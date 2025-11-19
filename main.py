@@ -16,9 +16,9 @@ class NovoRequest(BaseModel):
     interval: str = "1d"
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def root():
-    """Root-endpoint så Render får et hurtigt 200 OK."""
+    """Root-endpoint så Render får et hurtigt 200 OK (både GET og HEAD)."""
     return {"status": "ok", "message": "Novo B API is running"}
 
 
