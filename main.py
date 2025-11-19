@@ -50,50 +50,34 @@ def novo_b_chart(req: NovoRequest):
         if df.empty:
             raise HTTPException(status_code=404, detail="Ingen data retur fra yfinance")
 
-        # 2) Forbered data
-        df = df.reset_index()  # gør index til kolonne(r)
+        # 2) Brug index som dato – ingen Date-kolonne-fnidder
+        # df.index er typisk en DatetimeIndex
+        df = df.copy()
 
-        # --- NY LOGIK: find datokolonnen robust ---
-        date_col = None
-
-        # a) Find en kolonne der allerede er datetime64
-        for col in df.columns:
-            if np.issubdtype(df[col].dtype, np.datetime64):
-                date_col = col
-                break
-
-        # b) Hvis ingen datetime-kolonne, prøv første kolonne som dato
-        if date_col is None:
-            first_col = df.columns[0]
-            try:
-                df[first_col] = pd.to_datetime(df[first_col], errors="coerce")
-                if df[first_col].notna().any():
-                    date_col = first_col
-            except Exception:
-                pass
-
-        if date_col is None:
-            raise HTTPException(status_code=500, detail="Ingen datokolonne fundet i data fra yfinance")
-
-        # c) Omdøb til 'Date' hvis nødvendigt
-        if date_col != "Date":
-            df.rename(columns={date_col: "Date"}, inplace=True)
-
-        # Fjern rækker uden gyldig dato
-        df = df.dropna(subset=["Date"])
-        if df.empty:
-            raise HTTPException(status_code=404, detail="Ingen gyldige datoer i data")
-
+        # sikr at vi har en Close-kolonne
         if "Close" not in df.columns:
             raise HTTPException(status_code=500, detail="Close-kolonne ikke fundet i data")
 
-        # Sorter kronologisk
-        df = df.sort_values("Date")
+        # lav en ren DataFrame med Date + Close
+        df2 = pd.DataFrame({
+            "Date": df.index,
+            "Close": df["Close"].values
+        })
+
+        # konverter Date til datetime for en sikkerheds skyld
+        df2["Date"] = pd.to_datetime(df2["Date"], errors="coerce")
+        df2 = df2.dropna(subset=["Date"])
+
+        if df2.empty:
+            raise HTTPException(status_code=404, detail="Ingen gyldige datoer i data")
+
+        # sortér kronologisk
+        df2 = df2.sort_values("Date")
 
         # Begræns til sidste 365 dage
-        last_date = df["Date"].max()
+        last_date = df2["Date"].max()
         cutoff = last_date - pd.Timedelta(days=365)
-        df12 = df[df["Date"] >= cutoff].copy()
+        df12 = df2[df2["Date"] >= cutoff].copy()
 
         if df12.empty:
             raise HTTPException(status_code=404, detail="Ingen data i de sidste 12 måneder")
@@ -153,8 +137,7 @@ def novo_b_chart(req: NovoRequest):
         }
 
     except HTTPException:
-        # HTTPException skal bare sendes videre uændret
         raise
     except Exception as e:
-        # Alle andre fejl sendes som JSON i 'detail'
         raise HTTPException(status_code=500, detail=f"Serverfejl: {str(e)}")
+
