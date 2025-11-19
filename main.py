@@ -51,20 +51,36 @@ def novo_b_chart(req: NovoRequest):
             raise HTTPException(status_code=404, detail="Ingen data retur fra yfinance")
 
         # 2) Forbered data
-        df = df.reset_index()  # gør index (Date) til kolonne
+        df = df.reset_index()  # gør index til kolonne(r)
 
-        # Sikr at vi har en Date-kolonne
-        if "Date" not in df.columns:
+        # --- NY LOGIK: find datokolonnen robust ---
+        date_col = None
+
+        # a) Find en kolonne der allerede er datetime64
+        for col in df.columns:
+            if np.issubdtype(df[col].dtype, np.datetime64):
+                date_col = col
+                break
+
+        # b) Hvis ingen datetime-kolonne, prøv første kolonne som dato
+        if date_col is None:
             first_col = df.columns[0]
-            df.rename(columns={first_col: "Date"}, inplace=True)
+            try:
+                df[first_col] = pd.to_datetime(df[first_col], errors="coerce")
+                if df[first_col].notna().any():
+                    date_col = first_col
+            except Exception:
+                pass
 
-        # Konverter Date til datetime, hvis det ikke allerede er det
-        if not np.issubdtype(df["Date"].dtype, np.datetime64):
-            df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+        if date_col is None:
+            raise HTTPException(status_code=500, detail="Ingen datokolonne fundet i data fra yfinance")
+
+        # c) Omdøb til 'Date' hvis nødvendigt
+        if date_col != "Date":
+            df.rename(columns={date_col: "Date"}, inplace=True)
 
         # Fjern rækker uden gyldig dato
         df = df.dropna(subset=["Date"])
-
         if df.empty:
             raise HTTPException(status_code=404, detail="Ingen gyldige datoer i data")
 
